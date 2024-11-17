@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.1/dist/css/bootstrap.min.css" rel="stylesheet"
+    integrity="sha384-4bw+/aepP/YC94hEpVNVgiZdgIC5+VKNBQNGCHeKRQN+PtmoHDEXuppvnDJzQIu9" crossorigin="anonymous" />
+  <link rel="stylesheet" href="main.css">
+  <title>Piramal Finance AI Lab</title>
+</head>
+
+<body data-bs-theme="dark">
+  <div class="container">
+    <div class="header">
+      <div class="logo-container">
+        <div class="logo-wrapper">
+          <img src="assets/images/logo/test.png" alt="Piramal Logo" class="company-logo">
+        </div>
+        <div class="title-container">
+          <h1 class="gradient-text">Piramal Finance AI Lab</h1>
+          <h2 class="subheader">Research on Edge LLM</h2>
+        </div>
+      </div>
+    </div>
+
+    <div id="status-container">
+      <div class="status-message">
+        <div class="spinner-border text-light" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <div id="status" class="status-text">Initializing model...</div>
+      </div>
+    </div>
+
+    <div id="scroll-wrapper">
+      <div id="chat-container" class="card">
+        <div class="card-body">
+          <div id="chat-history"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="container p-0 card" id="input-area">
+    <div class="input-group">
+      <textarea class="form-control" id="user-input" placeholder="Type your question here ..." disabled></textarea>
+      <button id="send-button" class="btn btn-primary" disabled>Send</button>
+    </div>
+  </div>
+
+  <script type="module" src="dist/main.js"></script>
+</body>
+
+</html>
