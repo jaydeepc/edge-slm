@@ -1,23 +1,13 @@
 import { env, AutoTokenizer } from '@xenova/transformers';
 import { LLM } from './llm.js';
 import { marked } from 'marked';
+import { ragSystem } from './rag.js';
+import { clipboardIcon } from './icons.js';
 
 const MODELS = {
   "phi3": { name: "phi3", path: "microsoft/Phi-3-mini-4k-instruct-onnx-web", externaldata: true },
   "phi3dev": { name: "phi3dev", path: "schmuell/Phi-3-mini-4k-instruct-onnx-web", externaldata: true },
 }
-
-const preCannedQueries = {
-  "1": "Tell me about the lighthouse of Alexandria.",
-  "2": "Did the lighthouse of Alexandria existed at the same time the library of Alexandria existed?",
-  "3": "How did the Pharos lighthouse impact ancient maritime trade?",
-  "4": "Tell me about Constantinople.",
-};
-
-const clipboardIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-clipboard" viewBox="0 0 16 16">
-<path d="M4 1.5H3a2 2 0 0 0-2 2V14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V3.5a2 2 0 0 0-2-2h-1v1h1a1 1 0 0 1 1 1V14a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3.5a1 1 0 0 1 1-1h1v-1z"/>
-<path d="M9.5 1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-3a.5.5 0 0 1-.5-.5v-1a.5.5 0 0 1 .5-.5h3zm-3-1A1.5 1.5 0 0 0 5 1.5v1A1.5 1.5 0 0 0 6.5 4h3A1.5 1.5 0 0 0 11 2.5v-1A1.5 1.5 0 0 0 9.5 0h-3z"/>
-</svg>`
 
 function updateStatus(message) {
   const statusElement = document.getElementById('status');
@@ -29,6 +19,8 @@ function enableInterface() {
   document.getElementById('user-input').disabled = false;
   document.getElementById('send-button').disabled = false;
   document.getElementById('status-container').style.display = 'none';
+  document.getElementById('knowledge-input').disabled = false;
+  document.getElementById('process-text').disabled = false;
   document.getElementById('user-input').focus();
 }
 
@@ -37,6 +29,37 @@ marked.use({ mangle: false, headerIds: false });
 const sendButton = document.getElementById('send-button');
 const scrollWrapper = document.getElementById('scroll-wrapper');
 const userInput = document.getElementById('user-input');
+const knowledgeInput = document.getElementById('knowledge-input');
+const processTextButton = document.getElementById('process-text');
+const processStatus = document.getElementById('process-status');
+
+// Handle knowledge base text processing
+processTextButton.addEventListener('click', async () => {
+  const text = knowledgeInput.value.trim();
+  if (text.length === 0) {
+    processStatus.textContent = 'Please enter some text to process.';
+    return;
+  }
+
+  processStatus.textContent = 'Processing text...';
+  processTextButton.disabled = true;
+  knowledgeInput.disabled = true;
+
+  try {
+    // Clear previous knowledge base
+    ragSystem.clear();
+    
+    // Process new text
+    const numChunks = await ragSystem.processText(text);
+    processStatus.textContent = `Successfully processed text into ${numChunks} chunks.`;
+  } catch (error) {
+    console.error(error);
+    processStatus.textContent = 'Error processing text. Please try again.';
+  } finally {
+    processTextButton.disabled = false;
+    knowledgeInput.disabled = false;
+  }
+});
 
 //
 // auto scroll the content area until a user scrolls up
@@ -162,12 +185,6 @@ userInput.addEventListener('keydown', function (e) {
     } else if (!e.shiftKey) {
       submitRequest(e);
     }
-  } else {
-    const query = preCannedQueries[e.key];
-    if (e.ctrlKey && query) {
-      userInput.value = query;
-      submitRequest(e);
-    }
   }
 });
 
@@ -225,7 +242,15 @@ function token_to_text(tokenizer, tokens, startidx) {
 }
 
 async function Query(continuation, query, cb) {
-  let prompt = (continuation) ? query : `<|system|>\nYou are a friendly assistant.<|end|>\n<|user|>\n${query}<|end|>\n<|assistant|>\n`;
+  // Get relevant context from RAG system if available
+  let relevantContext = '';
+  if (ragSystem.embeddings.length > 0) {
+    const contexts = await ragSystem.findRelevantContext(query);
+    relevantContext = contexts.join('\n\n');
+  }
+
+  let prompt = (continuation) ? query : 
+    `<|system|>\nYou are a friendly assistant. ${relevantContext ? 'Use the following context to help answer the question:\n\n' + relevantContext + '\n\n' : ''}<|end|>\n<|user|>\n${query}<|end|>\n<|assistant|>\n`;
 
   const { input_ids } = await tokenizer(prompt, { return_tensor: false, padding: true, truncation: true });
 
@@ -266,6 +291,9 @@ async function Init(hasFP16) {
       max_tokens: config.max_tokens,
       hasFP16: hasFP16,
     });
+
+    updateStatus("Initializing RAG system...");
+    await ragSystem.initialize();
     
     updateStatus("Ready! You can now start chatting.");
     enableInterface();

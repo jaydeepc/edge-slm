@@ -77,6 +77,37 @@ body {
   margin: 0;
 }
 
+/* PDF Upload Styles */
+.card {
+  background: white;
+  border: none;
+  border-radius: 12px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.card-title {
+  color: #2d3436;
+  font-size: 1.2rem;
+  font-weight: 500;
+  margin-bottom: 16px;
+}
+
+#upload-status {
+  margin-top: 8px;
+  font-size: 0.9rem;
+}
+
+#pdf-upload {
+  border: 2px dashed #e9ecef;
+  padding: 12px;
+  border-radius: 8px;
+  transition: border-color 0.3s ease;
+}
+
+#pdf-upload:hover {
+  border-color: #fca311;
+}
+
 .user-message {
   background-color: #e9ecef;
   color: #2d3436;
