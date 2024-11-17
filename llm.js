@@ -4,7 +4,6 @@ ort.env.wasm.numThreads = 1;
 ort.env.wasm.simd = true;
 ort.env.wasm.wasmPaths = document.location.pathname.replace('index.html', '') + 'dist/';
 
-
 function log(i) { console.log(i); document.getElementById('status').innerText += `\n${i}`; }
 
 //
@@ -47,11 +46,24 @@ export class LLM {
     kv_dims = [];
     dtype = "float16";
     max_tokens = 9999;
+    activeBuffers = new Set();
+    isProcessing = false;
+    modelConfig = null;
+    modelOptions = null;
 
     constructor() {
     }
 
     async load(model, options) {
+        this.modelConfig = model;
+        this.modelOptions = options;
+        await this.initSession();
+    }
+
+    async initSession() {
+        const model = this.modelConfig;
+        const options = this.modelOptions;
+
         const provider = options.provider || "webgpu";
         const verbose = options.verbose;
         const local = options.local;
@@ -110,36 +122,63 @@ export class LLM {
             ort.env.webgpu.profiling.mode = 'default';
         }
 
+        if (this.sess) {
+            await this.sess.release();
+        }
+
         this.sess = await ort.InferenceSession.create(model_bytes, opt);
         this.eos = model_config.eos_token_id;
         this.kv_dims = [1, model_config.num_key_value_heads, 0, model_config.hidden_size / model_config.num_attention_heads];
         this.dtype = (hasFP16) ? "float16" : "float32";
         this.num_layers = model_config.num_hidden_layers;
-        this.initilize_feed();
+        await this.initilize_feed();
     }
 
-    initilize_feed() {
-        const feed = this.feed;
+    async cleanup() {
+        try {
+            // Clean up GPU buffers
+            const cleanupPromises = Array.from(this.activeBuffers).map(async (buffer) => {
+                if (buffer && buffer.dispose) {
+                    try {
+                        await buffer.dispose();
+                    } catch (error) {
+                        console.error('Error disposing buffer:', error);
+                    }
+                }
+            });
+            await Promise.all(cleanupPromises);
+            this.activeBuffers.clear();
 
-        // dispose of previous gpu buffers
-        for (const name in feed) {
-            const t = feed[name];
-            if (t.location === 'gpu-buffer') {
-                t.dispose();
-            }
+            // Reset feed and tokens
+            this.feed = {};
+            this.output_tokens = [];
+        } catch (error) {
+            console.error('Error during cleanup:', error);
         }
-        this.feed = {};
-        // key value cache is zero copy, just pass gpu buffer as referece
+    }
+
+    async initilize_feed() {
+        await this.cleanup();
+
+        // Initialize new feed
         const empty = (this.dtype === "float16") ? new Uint16Array() : [];
         for (let i = 0; i < this.num_layers; ++i) {
-            this.feed[`past_key_values.${i}.key`] = new ort.Tensor(this.dtype, empty, this.kv_dims)
-            this.feed[`past_key_values.${i}.value`] = new ort.Tensor(this.dtype, empty, this.kv_dims)
+            const keyTensor = new ort.Tensor(this.dtype, empty, this.kv_dims);
+            const valueTensor = new ort.Tensor(this.dtype, empty, this.kv_dims);
+            
+            this.feed[`past_key_values.${i}.key`] = keyTensor;
+            this.feed[`past_key_values.${i}.value`] = valueTensor;
+            
+            // Track buffers
+            if (keyTensor.location === 'gpu-buffer') {
+                this.activeBuffers.add(keyTensor);
+            }
+            if (valueTensor.location === 'gpu-buffer') {
+                this.activeBuffers.add(valueTensor);
+            }
         }
-        this.output_tokens = [];
     }
 
-    //
-    // poor mens argmax
     argmax(t) {
         const arr = t.data;
         const start = t.dims[2] * (t.dims[1] - 1);
@@ -159,68 +198,88 @@ export class LLM {
         return maxidx;
     }
 
-    //
-    // update key value cache
-    //
-    update_kv_cache(feed, outputs) {
+    async update_kv_cache(feed, outputs) {
         for (const name in outputs) {
             if (name.startsWith('present')) {
                 let newName = name.replace('present', 'past_key_values');
-                // dispose previous gpu buffers
-                const t = feed[newName];
-                if (t.location === 'gpu-buffer') {
-                    t.dispose();
+                const oldTensor = feed[newName];
+                
+                // Remove old tensor from tracking and dispose
+                if (oldTensor && oldTensor.location === 'gpu-buffer') {
+                    this.activeBuffers.delete(oldTensor);
+                    await oldTensor.dispose();
                 }
+
+                // Add new tensor
                 feed[newName] = outputs[name];
+                if (outputs[name].location === 'gpu-buffer') {
+                    this.activeBuffers.add(outputs[name]);
+                }
             }
         }
     }
 
-    //
-    // tell generate to stop()
-    //
     abort() {
         this.stop = true;
     }
 
-    // 
-    // prefill prompt and generate tokens, greedy search only
-    //
     async generate(tokens, callback, options) {
-        const max_tokens = options.max_tokens || 256;
-        const feed = this.feed;
-        const input_ids = new ort.Tensor('int64', BigInt64Array.from(tokens.map(BigInt)), [1, tokens.length]);
-        feed['input_ids'] = input_ids;
-        this.stop = false;
-
-        this.output_tokens.push(...input_ids.data);
-
-        let last_token = 0n;
-        let seqlen = this.output_tokens.length;
-        const input_len = input_ids.size;
-
-        if (this.need_position_ids) {
-            feed['position_ids'] = new ort.Tensor('int64', BigInt64Array.from({ length: input_len }, (_, i) => BigInt(seqlen - input_len + i)), [1, input_len]);
+        if (this.isProcessing) {
+            throw new Error('Generation already in progress');
         }
 
-        while (last_token != this.eos && last_token != 32007 && seqlen < max_tokens && !this.stop) {
-            seqlen = this.output_tokens.length;
-            feed['attention_mask'] = new ort.Tensor('int64', BigInt64Array.from({ length: seqlen }, () => 1n), [1, seqlen]);
-            const outputs = await this.sess.run(feed);
-            last_token = BigInt(this.argmax(outputs.logits));
-            this.output_tokens.push(last_token);
-            if (callback && !this.profiler) {
-                callback(this.output_tokens);
-            }
-            this.update_kv_cache(feed, outputs);
-            feed['input_ids'] = new ort.Tensor('int64', BigInt64Array.from([last_token]), [1, 1]);
+        if (!this.sess) {
+            await this.initSession();
+        }
+
+        this.isProcessing = true;
+        try {
+            const max_tokens = options.max_tokens || 256;
+            const feed = this.feed;
+            const input_ids = new ort.Tensor('int64', BigInt64Array.from(tokens.map(BigInt)), [1, tokens.length]);
+            feed['input_ids'] = input_ids;
+            this.stop = false;
+
+            this.output_tokens.push(...input_ids.data);
+
+            let last_token = 0n;
+            let seqlen = this.output_tokens.length;
+            const input_len = input_ids.size;
+
             if (this.need_position_ids) {
-                feed['position_ids'] = new ort.Tensor('int64', BigInt64Array.from([BigInt(seqlen)]), [1, 1]);
+                feed['position_ids'] = new ort.Tensor('int64', BigInt64Array.from({ length: input_len }, (_, i) => BigInt(seqlen - input_len + i)), [1, input_len]);
             }
+
+            while (last_token != this.eos && last_token != 32007 && seqlen < max_tokens && !this.stop) {
+                seqlen = this.output_tokens.length;
+                feed['attention_mask'] = new ort.Tensor('int64', BigInt64Array.from({ length: seqlen }, () => 1n), [1, seqlen]);
+                
+                const outputs = await this.sess.run(feed);
+                last_token = BigInt(this.argmax(outputs.logits));
+                this.output_tokens.push(last_token);
+                
+                if (callback && !this.profiler) {
+                    callback(this.output_tokens);
+                }
+
+                await this.update_kv_cache(feed, outputs);
+                feed['input_ids'] = new ort.Tensor('int64', BigInt64Array.from([last_token]), [1, 1]);
+                
+                if (this.need_position_ids) {
+                    feed['position_ids'] = new ort.Tensor('int64', BigInt64Array.from([BigInt(seqlen)]), [1, 1]);
+                }
+            }
+
+            return this.output_tokens;
+        } catch (error) {
+            console.error('Error during generation:', error);
+            await this.initilize_feed();
+            throw error;
+        } finally {
+            if (this.profiler) {
+                this.sess.endProfiling();
+            }
+            this.isProcessing = false;
         }
-        if (this.profiler) {
-            this.sess.endProfiling();
-        }
-        return this.output_tokens;
     }
 }

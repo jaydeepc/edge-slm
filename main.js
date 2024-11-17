@@ -186,6 +186,8 @@ async function submitRequest(e) {
 
   // toggle button to stop text generation
   sendButton.innerHTML = "Stop";
+  sendButton.disabled = true;
+  userInput.disabled = true;
 
   // change autoScroller to keep track of our new responseDiv
   autoScroller.observe(responseDiv);
@@ -203,8 +205,16 @@ async function submitRequest(e) {
   } catch (error) {
     console.error(error);
     responseDiv.innerHTML = "Sorry, there was an error processing your request. Please try again.";
+    // Attempt to recover the session
+    try {
+      await llm.initSession();
+    } catch (sessionError) {
+      console.error('Failed to recover session:', sessionError);
+    }
   } finally {
     sendButton.innerHTML = "Send";
+    sendButton.disabled = false;
+    userInput.disabled = false;
     spinner.remove();
     userInput.value = '';
     userInput.focus();
@@ -279,36 +289,41 @@ function token_to_text(tokenizer, tokens, startidx) {
 }
 
 async function Query(continuation, query, cb) {
-  // Get relevant context from RAG system if available
-  let relevantContext = '';
-  if (ragSystem.embeddings.length > 0) {
-    const contexts = await ragSystem.findRelevantContext(query);
-    relevantContext = contexts.join('\n\n');
-  }
-
-  let prompt = (continuation) ? query : 
-    `<|system|>\nYou are a friendly assistant. ${relevantContext ? 'Use the following context to help answer the question:\n\n' + relevantContext + '\n\n' : ''}<|end|>\n<|user|>\n${query}<|end|>\n<|assistant|>\n`;
-
-  const { input_ids } = await tokenizer(prompt, { return_tensor: false, padding: true, truncation: true });
-
-  // clear caches 
-  llm.initilize_feed();
-
-  const start_timer = performance.now();
-  const output_index = llm.output_tokens.length + input_ids.length;
-  const output_tokens = await llm.generate(input_ids, (output_tokens) => {
-    if (output_tokens.length == input_ids.length + 1) {
-      // time to first token
-      const took = (performance.now() - start_timer) / 1000;
-      console.log(`time to first token in ${took.toFixed(1)}sec, ${input_ids.length} tokens`);
+  try {
+    // Get relevant context from RAG system if available
+    let relevantContext = '';
+    if (ragSystem.embeddings.length > 0) {
+      const contexts = await ragSystem.findRelevantContext(query);
+      relevantContext = contexts.join('\n\n');
     }
-    cb(token_to_text(tokenizer, output_tokens, output_index));
-  }, { max_tokens: config.max_tokens });
 
-  const took = (performance.now() - start_timer) / 1000;
-  cb(token_to_text(tokenizer, output_tokens, output_index));
-  const seqlen = output_tokens.length - output_index;
-  console.log(`${seqlen} tokens in ${took.toFixed(1)}sec, ${(seqlen / took).toFixed(2)} tokens/sec`);
+    let prompt = (continuation) ? query : 
+      `<|system|>\nYou are a friendly assistant. ${relevantContext ? 'Use the following context to help answer the question:\n\n' + relevantContext + '\n\n' : ''}<|end|>\n<|user|>\n${query}<|end|>\n<|assistant|>\n`;
+
+    const { input_ids } = await tokenizer(prompt, { return_tensor: false, padding: true, truncation: true });
+
+    // clear caches 
+    await llm.initilize_feed();
+
+    const start_timer = performance.now();
+    const output_index = llm.output_tokens.length + input_ids.length;
+    const output_tokens = await llm.generate(input_ids, (output_tokens) => {
+      if (output_tokens.length == input_ids.length + 1) {
+        // time to first token
+        const took = (performance.now() - start_timer) / 1000;
+        console.log(`time to first token in ${took.toFixed(1)}sec, ${input_ids.length} tokens`);
+      }
+      cb(token_to_text(tokenizer, output_tokens, output_index));
+    }, { max_tokens: config.max_tokens });
+
+    const took = (performance.now() - start_timer) / 1000;
+    cb(token_to_text(tokenizer, output_tokens, output_index));
+    const seqlen = output_tokens.length - output_index;
+    console.log(`${seqlen} tokens in ${took.toFixed(1)}sec, ${(seqlen / took).toFixed(2)} tokens/sec`);
+  } catch (error) {
+    console.error('Error in Query:', error);
+    throw error;
+  }
 }
 
 //
