@@ -21,6 +21,8 @@ function enableInterface() {
   document.getElementById('status-container').style.display = 'none';
   document.getElementById('knowledge-input').disabled = false;
   document.getElementById('process-text').disabled = false;
+  document.getElementById('process-pdf').disabled = false;
+  document.getElementById('pdf-upload').disabled = false;
   document.getElementById('user-input').focus();
 }
 
@@ -31,6 +33,8 @@ const scrollWrapper = document.getElementById('scroll-wrapper');
 const userInput = document.getElementById('user-input');
 const knowledgeInput = document.getElementById('knowledge-input');
 const processTextButton = document.getElementById('process-text');
+const pdfUpload = document.getElementById('pdf-upload');
+const processPdfButton = document.getElementById('process-pdf');
 const processStatus = document.getElementById('process-status');
 
 // Handle knowledge base text processing
@@ -58,6 +62,39 @@ processTextButton.addEventListener('click', async () => {
   } finally {
     processTextButton.disabled = false;
     knowledgeInput.disabled = false;
+  }
+});
+
+// Handle PDF processing
+processPdfButton.addEventListener('click', async () => {
+  const file = pdfUpload.files[0];
+  if (!file) {
+    processStatus.textContent = 'Please select a PDF file.';
+    return;
+  }
+
+  if (file.type !== 'application/pdf') {
+    processStatus.textContent = 'Please upload a valid PDF file.';
+    return;
+  }
+
+  processStatus.textContent = 'Processing PDF...';
+  processPdfButton.disabled = true;
+  pdfUpload.disabled = true;
+
+  try {
+    // Clear previous knowledge base
+    ragSystem.clear();
+    
+    // Process PDF
+    const numChunks = await ragSystem.processPDF(file);
+    processStatus.textContent = `Successfully processed PDF into ${numChunks} chunks.`;
+  } catch (error) {
+    console.error(error);
+    processStatus.textContent = 'Error processing PDF. Please try again.';
+  } finally {
+    processPdfButton.disabled = false;
+    pdfUpload.disabled = false;
   }
 });
 

@@ -77,7 +77,35 @@ body {
   margin: 0;
 }
 
-/* PDF Upload Styles */
+/* Input Tabs Styles */
+.nav-tabs {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.nav-tabs .nav-link {
+  color: #2d3436;
+  border: none;
+  padding: 8px 16px;
+  margin-right: 8px;
+  border-radius: 8px 8px 0 0;
+  transition: all 0.3s ease;
+}
+
+.nav-tabs .nav-link:hover {
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.nav-tabs .nav-link.active {
+  color: #ff6b6b;
+  border-bottom: 2px solid #ff6b6b;
+  background-color: transparent;
+}
+
+.tab-content {
+  padding-top: 20px;
+}
+
+/* Card Styles */
 .card {
   background: white;
   border: none;
@@ -92,20 +120,22 @@ body {
   margin-bottom: 16px;
 }
 
-#upload-status {
-  margin-top: 8px;
-  font-size: 0.9rem;
-}
-
-#pdf-upload {
-  border: 2px dashed #e9ecef;
+#knowledge-input, #pdf-upload {
+  border: 2px solid #e9ecef;
   padding: 12px;
   border-radius: 8px;
   transition: border-color 0.3s ease;
 }
 
-#pdf-upload:hover {
+#knowledge-input:focus, #pdf-upload:focus {
   border-color: #fca311;
+  outline: none;
+  box-shadow: none;
+}
+
+#process-status {
+  margin-top: 12px;
+  font-size: 0.9rem;
 }
 
 .user-message {

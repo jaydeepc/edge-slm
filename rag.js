@@ -14,18 +14,68 @@ class RAGSystem {
         });
     }
 
+    // Function to extract text from PDF
+    async extractTextFromPDF(pdfFile) {
+        try {
+            const arrayBuffer = await pdfFile.arrayBuffer();
+            const loadingTask = pdfjsLib.getDocument({
+                data: arrayBuffer,
+                verbosity: 0
+            });
+
+            const pdf = await loadingTask.promise;
+            let fullText = '';
+            
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const textContent = await page.getTextContent();
+                const pageText = textContent.items.map(item => item.str).join(' ');
+                fullText += pageText + ' ';
+            }
+
+            return fullText;
+        } catch (error) {
+            console.error('Error extracting PDF text:', error);
+            throw new Error('Failed to extract text from PDF');
+        }
+    }
+
+    // Function to split text into chunks
+    splitIntoChunks(text, maxChunkSize = 500) {
+        // First split by sentences
+        const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
+        const chunks = [];
+        let currentChunk = '';
+
+        for (const sentence of sentences) {
+            if ((currentChunk + sentence).length <= maxChunkSize) {
+                currentChunk += sentence + ' ';
+            } else {
+                if (currentChunk) {
+                    chunks.push(currentChunk.trim());
+                }
+                currentChunk = sentence + ' ';
+            }
+        }
+
+        if (currentChunk) {
+            chunks.push(currentChunk.trim());
+        }
+
+        return chunks;
+    }
+
     // Function to process new text content
     async processText(text) {
         try {
-            // Split text into chunks (simple splitting by sentences)
-            const chunks = text.match(/[^.!?]+[.!?]+/g) || [text];
-            const cleanChunks = chunks.map(chunk => chunk.trim()).filter(chunk => chunk.length > 0);
+            // Split text into chunks
+            const chunks = this.splitIntoChunks(text);
             
             // Store the chunks
-            this.documents.push(...cleanChunks);
+            this.documents.push(...chunks);
             
             // Compute embeddings for each chunk
-            for (const chunk of cleanChunks) {
+            for (const chunk of chunks) {
                 const output = await this.embedder(chunk, { pooling: 'mean' });
                 this.embeddings.push({
                     text: chunk,
@@ -33,9 +83,23 @@ class RAGSystem {
                 });
             }
             
-            return cleanChunks.length;
+            return chunks.length;
         } catch (error) {
             console.error('Error processing text:', error);
+            throw error;
+        }
+    }
+
+    // Function to process PDF file
+    async processPDF(file) {
+        try {
+            // Extract text from PDF
+            const text = await this.extractTextFromPDF(file);
+            
+            // Process the extracted text
+            return await this.processText(text);
+        } catch (error) {
+            console.error('Error processing PDF:', error);
             throw error;
         }
     }

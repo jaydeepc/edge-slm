@@ -32,7 +32,6 @@ export default {
         ]
     },
     plugins: [
-        // Copy .wasm files to dist folder
         new CopyWebpackPlugin({
             patterns: [
                 {
@@ -47,7 +46,7 @@ export default {
             directory: __dirname
         },
         port: 8080,
-        hot: false, // Disable HMR
+        hot: false,
         liveReload: true
     },
     experiments: {
