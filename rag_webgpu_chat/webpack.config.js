@@ -1,50 +1,26 @@
-import CopyWebpackPlugin from 'copy-webpack-plugin';
-import { fileURLToPath } from 'url';
-import path from 'path';
+const path = require('path');
 
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-export default {
-    mode: 'development',
-    devtool: 'source-map',
-    entry: {
-        'dist/main': './main.js',
-        'dist/main.min': './main.js',
-    },
-    output: {
-        filename: '[name].js',
-        path: __dirname,
-        library: {
-            type: 'module',
-        },
-    },
-    plugins: [
-        // Copy .wasm files to dist folder
-        new CopyWebpackPlugin({
-            patterns: [
-                {
-                    from: 'node_modules/onnxruntime-web/dist/*.jsep.*',
-                    to: 'dist/[name][ext]'
-                },
-            ],
-        })
-    ],
-    devServer: {
-        static: {
-            directory: __dirname
-        },
-        port: 8080
-    },
-    experiments: {
-        outputModule: true,
-    },
-    module: {
-        rules: [
-            {
-                test: /\.node$/,
-                loader: 'node-loader'
-            },
-        ],
-    },
+module.exports = {
+  entry: './main.js',
+  output: {
+    filename: 'bundle.js',
+    path: path.resolve(__dirname, 'dist'),
+  },
+  mode: 'development',
+  experiments: {
+    asyncWebAssembly: true,
+  },
+  module: {
+    rules: [
+      {
+        test: /\.worker\.js$/,
+        use: { 
+          loader: 'worker-loader',
+          options: { 
+            inline: 'no-fallback'
+          }
+        }
+      }
+    ]
+  }
 };
